@@ -32,12 +32,12 @@
 #
 ##########################################################################
 #
-#import RPi.GPIO as GPIO 
 import time
 import os
-import httplib2
-import ConfigParser
-import pygame
+import httplib2                     # Needed to communicate with camera
+import pygame                       # Needed to drive display
+import socket, fcntl, struct        # Needed to get IP address
+from config_utils import ConfigUtil
 
 class bentv_ui:
     # Basic Configuration
@@ -48,28 +48,59 @@ class bentv_ui:
     # Initialise some instance variables.
     screen = None
     font = None
+    textLine1 = "BenTV_UI"
+    textLine2 = "Waiting for Button Press to move camera"
     presetNo = 1
     presetTxt = ['NULL','Behind Door', 'Corner', 'Chair', 'Bed']
 
     def __init__(self):
+        """Initialise the bentv_ui class - reads the configuration file
+        and initialises the screen and GPIO monitor"""
         print "bentv.__init__()"
-        self.config = self.getConfigSectionMap(self.configFname, 
-                                          self.configSection)
-        print self.config
-        self.debug = self.getConfigBool("debug")
+        configPath = "%s/%s" % (os.path.dirname(os.path.realpath(__file__)),
+                                self.configFname)
+        print configPath
+        self.cfg = ConfigUtil(configPath,self.configSection)
+
+        self.debug = self.cfg.getConfigBool("debug")
         if (self.debug): print "Debug Mode"
         
+        self.hostname, self.ipaddr = self.getHostName()
+        print self.hostname, self.ipaddr
         self.presetNo = 1
         self.initScreen()
         self.initGPIO()
 
+    def getIpAddr(self,ifname):
+        """Return the IP Address of the given interface (e.g 'wlan0')
+        from http://raspberrypi.stackexchange.com/questions/6714/how-to-get-the-raspberry-pis-ip-address-for-ssh.
+        """
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        return socket.inet_ntoa(fcntl.ioctl(
+            s.fileno(),
+            0x8915,  # SIOCGIFADDR
+            struct.pack('256s', ifname[:15])
+        )[20:24])
+
+    def getHostName(self):
+        """Returns the hostname and IP address of the wireless interface as a tuple.
+        """
+        hostname = socket.gethostname()
+        ipaddr = self.getIpAddr("wlan0")
+        return (hostname,ipaddr)
+
     def initGPIO(self):
-        ##########################################
-        # Initialise the GPIO Pins
-        # Set the mode of numbering the pins.
-        pinNo = self.getConfigInt("gpiono")
+        """Initialise the GPIO pins - not we use GPIO pin numbers, not physical
+        pin numbers on rpi."""
+        haveGPIO = True
+        try:
+            import RPi.GPIO as GPIO 
+        except:
+            print "failed to import RPi.GPIO"
+            haveGPIO = False
+        pinNo = self.cfg.getConfigInt("gpiono")
         if (self.debug): print "gpioNo = %d" % pinNo
-        if (not self.debug):
+        if (haveGPIO):
             GPIO.setmode(GPIO.BCM)
             GPIO.setup(pinNo, GPIO.IN, pull_up_down=GPIO.PUD_UP)
             # very long debounce time to prevent presses while camera is moving.
@@ -78,80 +109,41 @@ class bentv_ui:
                                   callback=self.moveCamera, 
                                   bouncetime=1000)
         else:
-            print "debug - simulating camera move"
+            print "no GPIO - simulating camera move"
             self.moveCamera(1)
 
-    def getConfigBool(self,configName):
-        if (configName in self.config):
-            try:
-                retVal = bool(self.config[configName])
-            except ValueError:
-                print "configName is not a boolean"
-                retVal = False
-        else:
-            print "key %s not found" % configName
-            retVal = False
-        return retVal
 
-    def getConfigInt(self,configName):
-        if (configName in self.config):
-            try:
-                retVal = int(self.config[configName])
-            except ValueError:
-                print "configName is not an integer!!!"
-                retVal = -999
-        else:
-            print "key %s not found" % configName
-            retVal = -999
-        return retVal
-
-    def getConfigFloat(self,configName):
-        if (configName in self.config):
-            try:
-                retVal = float(self.config[configName])
-            except ValueError:
-                print "configName is not a float!!!"
-                retVal = -999
-        else:
-            print "key %s not found" % configName
-            retVal = -999
-        return retVal
-
-    def getConfigStr(self,configName):
-        if (configName in self.config):
-            retVal = self.config[configName]
-        else:
-            print "key %s not found" % configName
-            retVal = "NULL"
-        return retVal
-
-    def getConfigSectionMap(self,configFname, section):
-        '''Returns a dictionary containing the config file data in the section
-        specified by the parameter 'section'.   
-        configFname should be a string that is the path to a configuration file.'''
-        dict1 = {}
-        config = ConfigParser.ConfigParser()
-        config.read(configFname)
-        options = config.options(section)
-        for option in options:
-            try:
-                dict1[option] = config.get(section, option)
-                if dict1[option] == -1:
-                    DebugPrint("skip: %s" % option)
-            except:
-                print("exception on %s!" % option)
-                dict1[option] = None
-        return dict1
-
-
-    def display_text(self,line1,line2):
-        txtImg = self.font.render(line1,
-            True,(255,255,255))
+    def display_text(self):
+        """ Write the given text onto the display area of the screen"""
+        # Clear screen
         self.screen.fill((0, 0, 255))
+        # Line 1 text
+        txtImg = self.font.render(self.textLine1,
+            True,(255,255,255))
         self.screen.blit(txtImg,(0,380))
+        # Line 1 time
+        tnow = time.localtime(time.time())
+        txtStr = "%02d:%02d:%02d " % (tnow[3],tnow[4],tnow[5])
+        w = self.font.size(txtStr)[0]
+        txtImg = self.font.render(txtStr,
+            True,(255,255,255))
+        self.screen.blit(txtImg,(self.fbSize[0]-w,380))
+        # Line 2 text
+        txtImg = self.smallFont.render(self.textLine2,
+            True,(255,255,255))
+        self.screen.blit(txtImg,(0,400))
+        # Line 2 network info
+        txtStr = "Host: %s, IP: %s  " % (self.hostname, self.ipaddr)
+        w = self.smallFont.size(txtStr)[0]
+        txtImg = self.smallFont.render(txtStr,
+                                       True,
+                                       (255,255,255))
+        
+        self.screen.blit(txtImg,(self.fbSize[0]-w,400))
         pygame.display.update()
 
     def initScreen(self):    
+        """Initialise the display using the pygame library"""
         drivers = ['x11', 'fbcon', 'svgalib']
         found = False
         disp_no = os.getenv("DISPLAY")
@@ -172,42 +164,46 @@ class bentv_ui:
         if not found:
             raise Exception('No suitable video driver found!')
 
-        size = (pygame.display.Info().current_w, pygame.display.Info().current_h)
-        print "Framebuffer size: %d x %d" % (size[0], size[1])
+        self.fbSize = (pygame.display.Info().current_w, pygame.display.Info().current_h)
+        print "Framebuffer size: %d x %d" % self.fbSize
         if (disp_no):
-            self.screen = pygame.display.set_mode((640,480))
+            winSize = (640,480)
+            self.screen = pygame.display.set_mode(winSize)
+            self.fbSize = winSize
         else:
-            self.screen = pygame.display.set_mode(size, pygame.FULLSCREEN)
+            self.screen = pygame.display.set_mode(self.fbSize, pygame.FULLSCREEN)
         self.screen.fill((0, 0, 255))        
         pygame.font.init()
         self.font = pygame.font.Font(None,30)
-        self.display_text("BenTV_UI",None)
+        self.smallFont = pygame.font.Font(None,16)
+        self.display_text()
 
-    ##########################################
-    # Callback function when button is pressed
     def moveCamera(self,pinNo):
+        """Callback function when button is pressed"""
         print('moveCamera called by pin number %d. PresetNo=%d' % (pinNo,self.presetNo))
         h = httplib2.Http(".cache")
-        h.add_credentials(self.getConfigStr('uname'), 
-                          self.getConfigStr('passwd'))
+        h.add_credentials(self.cfg.getConfigStr('uname'), 
+                          self.cfg.getConfigStr('passwd'))
         #resp, content = h.request("http://192.168.1.24/preset.cgi?-act=goto&-status=1&-number=%d" % self.presetNo,"GET")
-        resp, content = h.request("%s/%s%d" % (self.getConfigStr('camaddr'),
-                                               self.getConfigStr('cammoveurl'),
+        resp, content = h.request("%s/%s%d" % (self.cfg.getConfigStr('camaddr'),
+                                               self.cfg.getConfigStr('cammoveurl'),
                                                self.presetNo),"GET")
         print "moved to preset %d - content=%s" % (self.presetNo,content)
-        self.display_text("Moved to Position %d (%s)" % (self.presetNo, self.presetTxt[self.presetNo]),
-                     None)
+        self.textLine1 = "Camera Position %d (%s)" % (self.presetNo, 
+                                                       self.presetTxt[self.presetNo])
         self.presetNo += 1
         if (self.presetNo > 4): self.presetNo = 1
 
  
 #############################################
-# Main loop - does nothing useful!!!
+# Main loop - initialise the user inteface,
+# then loop forever.
 if __name__ == "__main__":
     bentv = bentv_ui()
     #init_screen()
     print "starting main loop..."
     while 1: 
         #print "main loop..."
+        bentv.display_text()
         time.sleep(1)
 

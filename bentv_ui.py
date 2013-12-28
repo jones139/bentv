@@ -155,6 +155,7 @@ class bentv_ui:
                 os.putenv('SDL_VIDEODRIVER', driver)
             try:
                 pygame.display.init()
+                print 'Using Driver: {0}.'.format(driver)
             except pygame.error:
                 print 'Driver: {0} failed.'.format(driver)
                 continue
@@ -167,16 +168,22 @@ class bentv_ui:
         self.fbSize = (pygame.display.Info().current_w, pygame.display.Info().current_h)
         print "Framebuffer size: %d x %d" % self.fbSize
         if (disp_no):
+            print "Using X11 window"
             winSize = (640,480)
             self.screen = pygame.display.set_mode(winSize)
             self.fbSize = winSize
         else:
+            print "Using full screen framebuffer"
             self.screen = pygame.display.set_mode(self.fbSize, pygame.FULLSCREEN)
+        print "blank screen..."
         self.screen.fill((0, 0, 255))        
+        print "initialise fonts"
         pygame.font.init()
         self.font = pygame.font.Font(None,30)
         self.smallFont = pygame.font.Font(None,16)
+        print "calling display_text()"
         self.display_text()
+        print "initScreen complete"
 
     def moveCamera(self,pinNo):
         """Callback function when button is pressed"""

@@ -234,7 +234,7 @@ class bentv_ui:
                                       "GET")
             dataDict = json.loads(content)
             self.alarmStatus = int(dataDict['status'])
-            self.textLine1 = " Rate = %d (status=%d - %s)" % \
+            self.textLine1 = " Rate = %d bpm (status=%d - %s)" % \
                              (int(dataDict['rate']),
                               int(dataDict['status']),
                                   self.statusStrs[int(dataDict['status'])]

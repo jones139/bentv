@@ -33,11 +33,12 @@
 ##########################################################################
 #
 import time
-import os
+import sys,os
 import httplib2                     # Needed to communicate with camera
 import pygame                       # Needed to drive display
 import socket, fcntl, struct        # Needed to get IP address
 from config_utils import ConfigUtil
+import json
 
 class bentv_ui:
     # Basic Configuration
@@ -52,6 +53,22 @@ class bentv_ui:
     textLine2 = "Waiting for Button Press to move camera"
     presetNo = 1
     presetTxt = ['NULL','Behind Door', 'Corner', 'Chair', 'Bed']
+
+    # Alarms
+    ALARM_STATUS_OK = 0   # All ok, no alarms.
+    ALARM_STATUS_WARN = 1 # Warning status
+    ALARM_STATUS_FULL = 2 # Full alarm status.
+    ALARM_STATUS_NOT_FOUND = 3 # Benjamin not found in image 
+                               # (area below config area_threshold parameter)
+
+    statusStrs = ("OK","Warning","ALARM!!!","Ben Not Found")
+    screenBGColours = ( (0,0,255), # Blue for all ok
+                        (128,128,0), # Yellow for warning
+                        (255,0,0),  # Red for full alarm.
+                        (128,128,128) # Grey for not found.
+                        )
+    alarmStatus = 0   # Current alarm status
+
 
     def __init__(self):
         """Initialise the bentv_ui class - reads the configuration file
@@ -116,7 +133,7 @@ class bentv_ui:
     def display_text(self):
         """ Write the given text onto the display area of the screen"""
         # Clear screen
-        self.screen.fill((0, 0, 255))
+        self.screen.fill(self.screenBGColours[self.alarmStatus])
         # Line 1 text
         txtImg = self.font.render(self.textLine1,
             True,(255,255,255))
@@ -202,6 +219,36 @@ class bentv_ui:
         if (self.presetNo > 4): self.presetNo = 1
 
  
+    def getBenFinderData(self):
+        print "getBenfinderData"
+        h = httplib2.Http(".cache")
+        h.add_credentials(self.cfg.getConfigStr('uname'), 
+                          self.cfg.getConfigStr('passwd'))
+        requestStr = "%s:%s/%s" % \
+                     (self.cfg.getConfigStr('benfinderserver'),
+                      self.cfg.getConfigStr('benfinderport'),
+                      self.cfg.getConfigStr('benfinderurl'))
+        print requestStr
+        try:
+            resp, content = h.request(requestStr,
+                                      "GET")
+            dataDict = json.loads(content)
+            self.alarmStatus = int(dataDict['status'])
+            self.textLine1 = " Rate = %d (status=%d - %s)" % \
+                             (int(dataDict['rate']),
+                              int(dataDict['status']),
+                                  self.statusStrs[int(dataDict['status'])]
+                             )
+            print dataDict['time_t']
+            self.textLine2 = " Fit Detector Time = %s  " % dataDict['time_t']
+            print resp,content
+            return True
+        except:
+            print "Error:",sys.exc_info()[0]
+            self.textLine1 = "No Connection to Fit Detector"
+            return False
+        
+
 #############################################
 # Main loop - initialise the user inteface,
 # then loop forever.
@@ -210,7 +257,8 @@ if __name__ == "__main__":
     #init_screen()
     print "starting main loop..."
     while 1: 
-        #print "main loop..."
+        print "main loop..."
         bentv.display_text()
+        bentv.getBenFinderData()
         time.sleep(1)
 
